@@ -1,0 +1,15 @@
+services:
+  tts:
+    build: .
+    image: simple-tts
+    container_name: simple-tts
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Online engine by default, offline espeak-ng whenever it is unavailable.
+      TTS_ENGINE: edge
+      TTS_FALLBACK_ENGINE: espeak
+      TTS_MAX_CHARS: "20000"
+      TTS_MAX_CONCURRENCY: "4"
+      TTS_CACHE_SIZE: "128"

@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simple TTS</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --border: #dfe3e8;
+    --text: #16191d;
+    --muted: #6b7280;
+    --accent: #3b6ef5;
+    --accent-text: #ffffff;
+    --error-bg: #fdecec;
+    --error-text: #a4222a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --panel: #1c1f25;
+      --border: #2c313a;
+      --text: #e8eaed;
+      --muted: #9aa2ad;
+      --accent: #5b86ff;
+      --accent-text: #0b0d10;
+      --error-bg: #3a1d1f;
+      --error-text: #ff9b9b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 2rem 1rem 3rem;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 760px; margin: 0 auto; }
+  header { margin-bottom: 1.5rem; }
+  h1 { margin: 0 0 .25rem; font-size: 1.5rem; letter-spacing: -.01em; }
+  header p { margin: 0; color: var(--muted); }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.25rem;
+  }
+  label { display: block; font-size: .82rem; font-weight: 600; color: var(--muted); margin-bottom: .35rem; }
+  textarea, select, input[type="range"] {
+    width: 100%;
+    font: inherit;
+    color: var(--text);
+  }
+  textarea, select {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: .6rem .7rem;
+  }
+  textarea { min-height: 150px; resize: vertical; }
+  textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-top: 1rem; }
+  .row { display: flex; align-items: center; gap: .75rem; margin-top: 1.25rem; flex-wrap: wrap; }
+  button {
+    font: inherit;
+    font-weight: 600;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: .6rem 1.1rem;
+    cursor: pointer;
+    background: var(--accent);
+    color: var(--accent-text);
+  }
+  button.secondary { background: transparent; color: var(--text); border-color: var(--border); }
+  button[disabled] { opacity: .55; cursor: not-allowed; }
+  .meta { font-size: .82rem; color: var(--muted); }
+  .slider-value { float: right; font-weight: 400; }
+  audio { width: 100%; margin-top: 1.25rem; }
+  .error {
+    margin-top: 1rem;
+    padding: .7rem .8rem;
+    border-radius: 8px;
+    background: var(--error-bg);
+    color: var(--error-text);
+    font-size: .88rem;
+  }
+  footer { margin-top: 1.25rem; font-size: .82rem; color: var(--muted); }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Simple TTS</h1>
+    <p>Kostenlose Sprachausgabe ohne Limit, komplett selbst gehostet.</p>
+  </header>
+
+  <div class="panel">
+    <label for="text">Text <span class="slider-value" id="charCount">0</span></label>
+    <textarea id="text" placeholder="Text eingeben ..."></textarea>
+
+    <div class="grid">
+      <div>
+        <label for="engine">Engine</label>
+        <select id="engine"><option value="">Automatisch</option></select>
+      </div>
+      <div>
+        <label for="locale">Sprache</label>
+        <select id="locale"><option value="">Alle</option></select>
+      </div>
+      <div>
+        <label for="voice">Stimme</label>
+        <select id="voice"></select>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div>
+        <label for="rate">Tempo <span class="slider-value" id="rateValue">0 %</span></label>
+        <input type="range" id="rate" min="-50" max="100" step="5" value="0">
+      </div>
+      <div>
+        <label for="pitch">Tonhöhe <span class="slider-value" id="pitchValue">0</span></label>
+        <input type="range" id="pitch" min="-50" max="50" step="5" value="0">
+      </div>
+    </div>
+
+    <div class="row">
+      <button id="speak">Vorlesen</button>
+      <button id="download" class="secondary" disabled>Herunterladen</button>
+      <span class="meta" id="status"></span>
+    </div>
+
+    <div id="error" class="error" hidden></div>
+    <audio id="player" controls hidden></audio>
+  </div>
+
+  <footer>
+    API: <code>GET /api/tts?text=Hallo</code> und <code>POST /api/tts</code>. Stimmen unter <code>/api/voices</code>.
+  </footer>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const els = {
+  text: $("text"), engine: $("engine"), locale: $("locale"), voice: $("voice"),
+  rate: $("rate"), pitch: $("pitch"), rateValue: $("rateValue"), pitchValue: $("pitchValue"),
+  speak: $("speak"), download: $("download"), status: $("status"), error: $("error"),
+  player: $("player"), charCount: $("charCount"),
+};
+
+let allVoices = [];
+let lastBlobUrl = null;
+let lastFilename = "speech.mp3";
+
+const store = {
+  get(key, fallback) {
+    try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
+  },
+  set(key, value) {
+    try { localStorage.setItem(key, value); } catch { /* private mode */ }
+  },
+};
+
+function showError(message) {
+  els.error.textContent = message;
+  els.error.hidden = !message;
+}
+
+async function loadEngines() {
+  try {
+    const data = await (await fetch("/api/engines")).json();
+    for (const engine of data.engines) {
+      const option = document.createElement("option");
+      option.value = engine.name;
+      option.textContent = engine.available
+        ? `${engine.name}${engine.offline ? " (offline)" : ""}`
+        : `${engine.name} (nicht verfügbar)`;
+      option.disabled = !engine.available;
+      els.engine.append(option);
+    }
+    els.engine.value = store.get("engine", "");
+  } catch {
+    showError("Engines konnten nicht geladen werden.");
+  }
+}
+
+async function loadVoices() {
+  els.voice.innerHTML = "";
+  els.locale.innerHTML = '<option value="">Alle</option>';
+  const query = els.engine.value ? `?engine=${encodeURIComponent(els.engine.value)}` : "";
+  try {
+    const response = await fetch(`/api/voices${query}`);
+    if (!response.ok) throw new Error((await response.json()).detail);
+    allVoices = (await response.json()).voices;
+  } catch (err) {
+    allVoices = [];
+    showError(`Stimmen konnten nicht geladen werden: ${err.message}`);
+    return;
+  }
+  showError("");
+  for (const locale of [...new Set(allVoices.map((v) => v.locale))].sort()) {
+    const option = document.createElement("option");
+    option.value = locale;
+    option.textContent = locale;
+    els.locale.append(option);
+  }
+  const saved = store.get("locale", "de-DE");
+  els.locale.value = [...els.locale.options].some((o) => o.value === saved) ? saved : "";
+  renderVoices();
+}
+
+function renderVoices() {
+  const locale = els.locale.value;
+  const matching = locale ? allVoices.filter((v) => v.locale === locale) : allVoices;
+  els.voice.innerHTML = "";
+  for (const voice of matching) {
+    const option = document.createElement("option");
+    option.value = voice.id;
+    option.textContent = voice.label;
+    els.voice.append(option);
+  }
+  const saved = store.get("voice", "");
+  if ([...els.voice.options].some((o) => o.value === saved)) els.voice.value = saved;
+}
+
+async function speak() {
+  const text = els.text.value.trim();
+  if (!text) { showError("Bitte zuerst Text eingeben."); return; }
+  showError("");
+  els.speak.disabled = true;
+  els.status.textContent = "Wird erzeugt ...";
+  try {
+    const response = await fetch("/api/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text,
+        voice: els.voice.value || null,
+        engine: els.engine.value || null,
+        rate: Number(els.rate.value),
+        pitch: Number(els.pitch.value),
+      }),
+    });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(detail.detail || `Fehler ${response.status}`);
+    }
+    const usedEngine = response.headers.get("X-TTS-Engine") || "";
+    const usedVoice = response.headers.get("X-TTS-Voice") || "";
+    const blob = await response.blob();
+    if (lastBlobUrl) URL.revokeObjectURL(lastBlobUrl);
+    lastBlobUrl = URL.createObjectURL(blob);
+    lastFilename = `speech.${usedEngine === "espeak" ? "wav" : "mp3"}`;
+    els.player.src = lastBlobUrl;
+    els.player.hidden = false;
+    els.player.play().catch(() => { /* autoplay may be blocked */ });
+    els.download.disabled = false;
+    els.status.textContent = `${usedEngine} · ${usedVoice} · ${(blob.size / 1024).toFixed(0)} KB`;
+  } catch (err) {
+    showError(err.message);
+    els.status.textContent = "";
+  } finally {
+    els.speak.disabled = false;
+  }
+}
+
+els.text.addEventListener("input", () => {
+  els.charCount.textContent = els.text.value.length;
+  store.set("text", els.text.value);
+});
+els.rate.addEventListener("input", () => { els.rateValue.textContent = `${els.rate.value} %`; });
+els.pitch.addEventListener("input", () => { els.pitchValue.textContent = els.pitch.value; });
+els.engine.addEventListener("change", () => { store.set("engine", els.engine.value); loadVoices(); });
+els.locale.addEventListener("change", () => { store.set("locale", els.locale.value); renderVoices(); });
+els.voice.addEventListener("change", () => { store.set("voice", els.voice.value); });
+els.speak.addEventListener("click", speak);
+els.download.addEventListener("click", () => {
+  if (!lastBlobUrl) return;
+  const link = document.createElement("a");
+  link.href = lastBlobUrl;
+  link.download = lastFilename;
+  link.click();
+});
+
+els.text.value = store.get("text", "");
+els.charCount.textContent = els.text.value.length;
+loadEngines().then(loadVoices);
+</script>
+</body>
+</html>
